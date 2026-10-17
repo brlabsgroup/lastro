@@ -11,6 +11,8 @@ and every failure says what broke, why, and what to do. See ``diagnostics``.
 from __future__ import annotations
 
 import json
+import signal
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -58,6 +60,11 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _terminate(signum, frame) -> None:
+    """A `kill` (SIGTERM) behaves like Ctrl-C: long commands stop cleanly and say how to resume."""
+    raise KeyboardInterrupt
+
+
 @app.callback()
 def main(
     version: bool = typer.Option(
@@ -65,6 +72,8 @@ def main(
     ),
 ) -> None:
     """Root command. Subcommands do the work."""
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _terminate)
 
 
 @app.command("doctor")
@@ -193,21 +202,32 @@ def _filters(symbol: list[str] | None, interval: list[str] | None) -> tuple[list
 
 
 @data_app.command("fetch")
-def data_fetch(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTERVAL_OPTION) -> None:
-    """Download the pending files `data list` found. Resumable: files already on disk are skipped."""
+def data_fetch(
+    symbol: list[str] = _SYMBOL_OPTION,
+    interval: list[str] = _INTERVAL_OPTION,
+    workers: int = typer.Option(8, "--workers", min=1, max=32, help="Parallel downloads."),
+) -> None:
+    """Download the pending files `data list` found, 1d first, with their .CHECKSUM. Resumable."""
     from lastro.data import fetch
 
     symbols, intervals = _filters(symbol, interval)
-    params = {"symbols": symbols, "intervals": list(intervals) if intervals else None}
+    params = {"symbols": symbols, "intervals": list(intervals) if intervals else None, "workers": workers}
     conn = _open_db()
     started_at = _utcnow()
     clock = time.perf_counter()
     try:
-        result = fetch.fetch_pending(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        try:
+            result = fetch.fetch_pending(
+                conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"), workers=workers
+            )
+        except KeyboardInterrupt:
+            _record_run(conn, "data fetch", params, started_at, "interrupted", "stopped by the operator")
+            diagnostics.fail("downloading the archive", "interrupted", "run `lastro data fetch` again: it resumes where it stopped")
         elapsed = time.perf_counter() - clock
+        total = result.downloaded + result.skipped
         summary = (
             f"{result.downloaded} downloaded, {result.skipped} already on disk, "
-            f"{result.bytes / 1e6:.1f} MB, {elapsed:.0f} s"
+            f"{result.checksums}/{total} .CHECKSUM files, {result.bytes / 1e6:.1f} MB, {fetch.duration(elapsed)}"
         )
         if result.failed:
             for key, why in result.failed:
@@ -226,8 +246,8 @@ def data_fetch(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTERV
 
 @data_app.command("verify")
 def data_verify(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTERVAL_OPTION) -> None:
-    """Check downloaded files against the SHA-256 the archive publishes. Mismatches are deleted and re-queued."""
-    from lastro.data import checksum
+    """Check downloaded files against the SHA-256 the archive publishes (read from disk when fetch stored it)."""
+    from lastro.data import checksum, fetch
 
     symbols, intervals = _filters(symbol, interval)
     params = {"symbols": symbols, "intervals": list(intervals) if intervals else None}
@@ -235,9 +255,16 @@ def data_verify(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTER
     started_at = _utcnow()
     clock = time.perf_counter()
     try:
-        result = checksum.verify_downloaded(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        try:
+            result = checksum.verify_downloaded(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        except KeyboardInterrupt:
+            _record_run(conn, "data verify", params, started_at, "interrupted", "stopped by the operator")
+            diagnostics.fail("verifying the archive", "interrupted", "run `lastro data verify` again: files already verified are kept")
         elapsed = time.perf_counter() - clock
-        summary = f"{result.verified} verified, {len(result.failed)} failed, {elapsed:.0f} s"
+        summary = (
+            f"{result.verified} verified, {len(result.failed)} failed "
+            f"(checksums: {result.from_disk} from disk, {result.fetched} fetched), {fetch.duration(elapsed)}"
+        )
         if result.failed:
             for key, why in result.failed:
                 typer.echo(f"  FAIL  {key}: {why}", err=True)
@@ -264,7 +291,11 @@ def data_convert(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTE
     started_at = _utcnow()
     clock = time.perf_counter()
     try:
-        result = parquet.convert_verified(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        try:
+            result = parquet.convert_verified(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        except KeyboardInterrupt:
+            _record_run(conn, "data convert", params, started_at, "interrupted", "stopped by the operator")
+            diagnostics.fail("converting the archive", "interrupted", "run `lastro data convert` again: partitions are rebuilt whole, nothing is left half-written")
         elapsed = time.perf_counter() - clock
         summary = f"{result.files} files, {result.rows} rows into {result.partitions} partitions, {elapsed:.0f} s"
         if result.failed:
@@ -314,6 +345,9 @@ def data_quality(
         except quality.QualityError as exc:
             _record_run(conn, "data quality", params, started_at, "failed", str(exc))
             diagnostics.fail("running the quality checks", str(exc), "check the options and run again")
+        except KeyboardInterrupt:
+            _record_run(conn, "data quality", params, started_at, "interrupted", "stopped by the operator")
+            diagnostics.fail("running the quality checks", "interrupted", "run `lastro data quality` again; nothing was recorded")
         if not result.intervals_checked:
             _record_run(conn, "data quality", params, started_at, "failed", "no Parquet partitions")
             scope = "for " + ", ".join(symbols) if symbols else "at all"
@@ -360,6 +394,23 @@ def data_quality(
     finally:
         conn.close()
     diagnostics.done(summary)
+
+
+@data_app.command("status")
+def data_status() -> None:
+    """Where the pipeline stands: files per interval and status, disk usage, last run of each command."""
+    from lastro.data import status as status_module
+
+    conn = _open_db()
+    try:
+        status = status_module.collect(conn)
+    finally:
+        conn.close()
+    typer.echo(f"database: {config.db_path()}")
+    typer.echo(f"data dir: {config.data_dir()}")
+    for line in status_module.render(status):
+        typer.echo(line)
+    diagnostics.done(status_module.summary(status))
 
 
 @data_app.command("freeze")
