@@ -165,6 +165,8 @@ def data_list(
             diagnostics.fail("listing the archive", str(exc), "what was listed before the failure is kept; run again to continue")
         elapsed = time.perf_counter() - clock
         summary = f"{result.pairs} pairs, {result.files} files listed in {elapsed:.0f} s"
+        if result.empty_pairs:
+            summary += f"; {len(result.empty_pairs)} pairs with no files in these intervals: " + ", ".join(result.empty_pairs)
         if result.failed_pairs:
             for failed_symbol, why in result.failed_pairs:
                 typer.echo(f"  FAIL  {failed_symbol}: {why}", err=True)
@@ -180,16 +182,75 @@ def data_list(
     diagnostics.done(summary)
 
 
+_SYMBOL_OPTION = typer.Option(None, "--symbol", "-s", help="Limit to these pairs (repeatable).")
+_INTERVAL_OPTION = typer.Option(None, "--interval", "-i", help="Limit to these intervals (repeatable).")
+
+
+def _filters(symbol: list[str] | None, interval: list[str] | None) -> tuple[list[str] | None, tuple[str, ...] | None]:
+    symbols = [s.upper() for s in symbol] if symbol else None
+    intervals = tuple(interval) if interval else None
+    return symbols, intervals
+
+
 @data_app.command("fetch")
-def data_fetch() -> None:
-    """Download the files `data list` found and are still missing. (piece 3)"""
-    _not_yet(3)
+def data_fetch(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTERVAL_OPTION) -> None:
+    """Download the pending files `data list` found. Resumable: files already on disk are skipped."""
+    from lastro.data import fetch
+
+    symbols, intervals = _filters(symbol, interval)
+    params = {"symbols": symbols, "intervals": list(intervals) if intervals else None}
+    conn = _open_db()
+    started_at = _utcnow()
+    clock = time.perf_counter()
+    try:
+        result = fetch.fetch_pending(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        elapsed = time.perf_counter() - clock
+        summary = (
+            f"{result.downloaded} downloaded, {result.skipped} already on disk, "
+            f"{result.bytes / 1e6:.0f} MB, {elapsed:.0f} s"
+        )
+        if result.failed:
+            for key, why in result.failed:
+                typer.echo(f"  FAIL  {key}: {why}", err=True)
+            _record_run(conn, "data fetch", params, started_at, "partial", summary)
+            diagnostics.fail(
+                "downloading the archive",
+                f"{len(result.failed)} files failed; {summary}",
+                "run `lastro data fetch` again: files already on disk are kept, failed ones are retried",
+            )
+        _record_run(conn, "data fetch", params, started_at, "ok", summary)
+    finally:
+        conn.close()
+    diagnostics.done(summary)
 
 
 @data_app.command("verify")
-def data_verify() -> None:
-    """Check downloaded files against their published checksums. (piece 3)"""
-    _not_yet(3)
+def data_verify(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTERVAL_OPTION) -> None:
+    """Check downloaded files against the SHA-256 the archive publishes. Mismatches are deleted and re-queued."""
+    from lastro.data import checksum
+
+    symbols, intervals = _filters(symbol, interval)
+    params = {"symbols": symbols, "intervals": list(intervals) if intervals else None}
+    conn = _open_db()
+    started_at = _utcnow()
+    clock = time.perf_counter()
+    try:
+        result = checksum.verify_downloaded(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        elapsed = time.perf_counter() - clock
+        summary = f"{result.verified} verified, {len(result.failed)} failed, {elapsed:.0f} s"
+        if result.failed:
+            for key, why in result.failed:
+                typer.echo(f"  FAIL  {key}: {why}", err=True)
+            _record_run(conn, "data verify", params, started_at, "partial", summary)
+            diagnostics.fail(
+                "verifying the archive",
+                f"{len(result.failed)} files failed; {summary}",
+                "mismatched files were deleted and re-queued: run `lastro data fetch` then `lastro data verify` again",
+            )
+        _record_run(conn, "data verify", params, started_at, "ok", summary)
+    finally:
+        conn.close()
+    diagnostics.done(summary)
 
 
 @data_app.command("convert")
