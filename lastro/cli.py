@@ -1,8 +1,8 @@
 """The ``lastro`` command.
 
-Phase 1 exposes ``doctor``, ``db init`` and ``db status``. The ``data`` and
-``universe`` groups exist so the help output already shows the shape of the
-pipeline; their commands land piece by piece and say so until then.
+``doctor`` and the ``db`` group check and prepare the environment. The ``data``
+group is the pipeline in order: ``list``, ``fetch``, ``verify``, ``convert``,
+``quality``, ``freeze``. Commands that have not landed yet say so.
 
 Every command ends with one result line (``ok      ...`` or ``FAILED  ...``),
 and every failure says what broke, why, and what to do. See ``diagnostics``.
@@ -282,10 +282,79 @@ def data_convert(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTE
     diagnostics.done(summary)
 
 
+def _short(stamp: str) -> str:
+    return stamp.replace("T", " ").replace("+00:00", "")
+
+
+def _issue_line(issue) -> str:
+    period = _short(issue.period_start)
+    if issue.period_end and issue.period_end != issue.period_start:
+        period += " .. " + _short(issue.period_end)
+    where = f"{issue.symbol} {issue.interval}" + (f" {period}" if period else "")
+    return f"{where}: {issue.detail} -> {issue.action}"
+
+
 @data_app.command("quality")
-def data_quality() -> None:
-    """Run the quality checks and record issues. (piece 5)"""
-    _not_yet(5)
+def data_quality(
+    symbol: list[str] = _SYMBOL_OPTION,
+    interval: list[str] = _INTERVAL_OPTION,
+    show_all: bool = typer.Option(False, "--all", help="Print every finding, not just a few examples per type."),
+) -> None:
+    """Run the quality checks over the Parquet and record every finding in quality_issues. Corrects nothing."""
+    from lastro.data import quality
+
+    symbols, intervals = _filters(symbol, interval)
+    params = {"symbols": symbols, "intervals": list(intervals) if intervals else None}
+    conn = _open_db()
+    started_at = _utcnow()
+    clock = time.perf_counter()
+    try:
+        try:
+            result = quality.run_checks(conn, intervals=intervals, symbols=symbols, progress=lambda m: typer.echo(f"  {m}"))
+        except quality.QualityError as exc:
+            _record_run(conn, "data quality", params, started_at, "failed", str(exc))
+            diagnostics.fail("running the quality checks", str(exc), "check the options and run again")
+        if not result.intervals_checked:
+            _record_run(conn, "data quality", params, started_at, "failed", "no Parquet partitions")
+            scope = "for " + ", ".join(symbols) if symbols else "at all"
+            diagnostics.fail(
+                "running the quality checks",
+                f"no Parquet partitions found {scope}",
+                "run `lastro data fetch`, `lastro data verify` and `lastro data convert` first",
+            )
+        recorded = quality.record(conn, result, symbols)
+        elapsed = time.perf_counter() - clock
+        hard = quality.QualityResult.counts(result.hard_failures)
+        soft = quality.QualityResult.counts(result.issues)
+        for check, count in soft.items():
+            typer.echo(f"  {check.ljust(15)} {count}")
+            examples = [i for i in result.issues if i.check == check]
+            for issue in examples if show_all else examples[:5]:
+                typer.echo(f"    {_issue_line(issue)}")
+            if not show_all and len(examples) > 5:
+                typer.echo(f"    ... {len(examples) - 5} more in quality_issues (use --all to print them)")
+        for issue in result.hard_failures:
+            typer.echo(f"  FAIL  {_issue_line(issue)}", err=True)
+        summary = (
+            f"{result.rows_checked} rows checked, {recorded} findings recorded in quality_issues"
+            + (" (" + ", ".join(f"{k} {v}" for k, v in soft.items()) + ")" if soft else "")
+            + f", {elapsed:.0f} s"
+        )
+        if result.missing:
+            summary += "; no Parquet for " + ", ".join(result.missing)
+        if result.hard_failures:
+            _record_run(conn, "data quality", params, started_at, "failed", summary)
+            diagnostics.fail(
+                "quality checks",
+                f"{len(result.hard_failures)} hard failures ({', '.join(f'{k} {v}' for k, v in hard.items())}); "
+                "the Parquet cannot be used as it stands",
+                "rebuild the affected pairs with `lastro data verify` and `lastro data convert -s <pair>`; "
+                "if it persists the archive file itself is wrong: open an issue with the FAIL lines",
+            )
+        _record_run(conn, "data quality", params, started_at, "ok", summary)
+    finally:
+        conn.close()
+    diagnostics.done(summary)
 
 
 @data_app.command("freeze")

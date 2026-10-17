@@ -117,7 +117,7 @@ def test_cli_version():
 
 
 def test_unimplemented_commands_say_so():
-    result = CliRunner().invoke(app, ["data", "quality"])
+    result = CliRunner().invoke(app, ["data", "freeze"])
     assert result.exit_code == 2
     assert "not implemented yet" in result.output
-    assert "piece 5" in result.output
+    assert "piece 8" in result.output
