@@ -207,7 +207,7 @@ def data_fetch(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTERV
         elapsed = time.perf_counter() - clock
         summary = (
             f"{result.downloaded} downloaded, {result.skipped} already on disk, "
-            f"{result.bytes / 1e6:.0f} MB, {elapsed:.0f} s"
+            f"{result.bytes / 1e6:.1f} MB, {elapsed:.0f} s"
         )
         if result.failed:
             for key, why in result.failed:
@@ -254,9 +254,32 @@ def data_verify(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTER
 
 
 @data_app.command("convert")
-def data_convert() -> None:
-    """Convert verified zips into partitioned Parquet. (piece 4)"""
-    _not_yet(4)
+def data_convert(symbol: list[str] = _SYMBOL_OPTION, interval: list[str] = _INTERVAL_OPTION) -> None:
+    """Convert verified zips into partitioned Parquet (one file per pair, interval and year)."""
+    from lastro.data import parquet
+
+    symbols, intervals = _filters(symbol, interval)
+    params = {"symbols": symbols, "intervals": list(intervals) if intervals else None}
+    conn = _open_db()
+    started_at = _utcnow()
+    clock = time.perf_counter()
+    try:
+        result = parquet.convert_verified(conn, symbols=symbols, intervals=intervals, progress=lambda m: typer.echo(f"  {m}"))
+        elapsed = time.perf_counter() - clock
+        summary = f"{result.files} files, {result.rows} rows into {result.partitions} partitions, {elapsed:.0f} s"
+        if result.failed:
+            for key, why in result.failed:
+                typer.echo(f"  FAIL  {key}: {why}", err=True)
+            _record_run(conn, "data convert", params, started_at, "partial", summary)
+            diagnostics.fail(
+                "converting the archive",
+                f"{len(result.failed)} files failed; {summary}",
+                "partitions containing a failed file were not written; fix the cause (see each FAIL line) and run again",
+            )
+        _record_run(conn, "data convert", params, started_at, "ok", summary)
+    finally:
+        conn.close()
+    diagnostics.done(summary)
 
 
 @data_app.command("quality")

@@ -105,7 +105,7 @@ def test_cli_doctor_offline_fails_before_init_and_passes_after(data_dir: Path):
 
 
 def test_fail_prints_three_parts_and_exits():
-    result = CliRunner().invoke(app, ["data", "convert"])
+    result = CliRunner().invoke(app, ["data", "quality"])
     assert result.exit_code == 2
     assert "FAILED  this command" in result.output
     assert "why:" in result.output
