@@ -344,12 +344,17 @@ def data_quality(
             summary += "; no Parquet for " + ", ".join(result.missing)
         if result.hard_failures:
             _record_run(conn, "data quality", params, started_at, "failed", summary)
+            fixes = {
+                "source": "source: rows came from zips that are not verified; run `lastro data verify` "
+                          "then `lastro data convert -s <pair>` to rebuild them",
+                "timestamp": "timestamp: candles before 2017 or in the future mean the converter misread "
+                             "the unit; this is a Lastro bug, open an issue with the FAIL lines",
+            }
             diagnostics.fail(
                 "quality checks",
                 f"{len(result.hard_failures)} hard failures ({', '.join(f'{k} {v}' for k, v in hard.items())}); "
                 "the Parquet cannot be used as it stands",
-                "rebuild the affected pairs with `lastro data verify` and `lastro data convert -s <pair>`; "
-                "if it persists the archive file itself is wrong: open an issue with the FAIL lines",
+                "; ".join(fixes[k] for k in hard),
             )
         _record_run(conn, "data quality", params, started_at, "ok", summary)
     finally:
