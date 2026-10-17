@@ -10,10 +10,34 @@ and every failure says what broke, why, and what to do. See ``diagnostics``.
 
 from __future__ import annotations
 
+import json
+import time
+from datetime import datetime, timezone
+
 import typer
 
 from lastro import __version__, config, diagnostics
 from lastro.db import store
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _open_db():
+    """Open the database for a command, failing with instructions if it is missing."""
+    path = config.db_path()
+    if not path.exists():
+        diagnostics.fail("opening the database", f"no database at {path}", "run `lastro db init`")
+    return store.connect(path)
+
+
+def _record_run(conn, command: str, parameters: dict, started_at: str, outcome: str, detail: str) -> None:
+    with store.transaction(conn):
+        conn.execute(
+            "INSERT INTO runs (command, parameters, started_at, finished_at, outcome, detail) VALUES (?, ?, ?, ?, ?, ?)",
+            (command, json.dumps(parameters, sort_keys=True), started_at, _utcnow(), outcome, detail),
+        )
 
 app = typer.Typer(
     help="Lastro: long/cash spot crypto allocator with a verifiable research laboratory.",
@@ -114,10 +138,52 @@ def _not_yet(piece: int) -> None:
     )
 
 
+@data_app.command("list")
+def data_list(
+    symbol: list[str] = typer.Option(
+        None, "--symbol", "-s", help="Limit to these pairs (repeatable). Default: every USDT pair."
+    ),
+    interval: list[str] = typer.Option(
+        None, "--interval", "-i", help="Limit to these intervals (repeatable). Default: 1d, 4h, 1h."
+    ),
+) -> None:
+    """Enumerate the public archive: which pairs and months exist, alive or dead. Downloads nothing."""
+    from lastro.data import archive
+
+    intervals = tuple(interval) if interval else archive.INTERVALS
+    symbols = [s.upper() for s in symbol] if symbol else None
+    conn = _open_db()
+    started_at = _utcnow()
+    clock = time.perf_counter()
+    try:
+        try:
+            result = archive.enumerate_archive(
+                conn, intervals=intervals, symbols=symbols, progress=lambda msg: typer.echo(f"  {msg}")
+            )
+        except archive.ArchiveError as exc:
+            _record_run(conn, "data list", {"symbols": symbols, "intervals": list(intervals)}, started_at, "failed", str(exc))
+            diagnostics.fail("listing the archive", str(exc), "what was listed before the failure is kept; run again to continue")
+        elapsed = time.perf_counter() - clock
+        summary = f"{result.pairs} pairs, {result.files} files listed in {elapsed:.0f} s"
+        if result.failed_pairs:
+            for failed_symbol, why in result.failed_pairs:
+                typer.echo(f"  FAIL  {failed_symbol}: {why}", err=True)
+            _record_run(conn, "data list", {"symbols": symbols, "intervals": list(intervals)}, started_at, "partial", summary)
+            diagnostics.fail(
+                "listing the archive",
+                f"{len(result.failed_pairs)} pairs failed; {summary}",
+                "run `lastro data list` again: pairs already listed are kept, failed ones are retried",
+            )
+        _record_run(conn, "data list", {"symbols": symbols, "intervals": list(intervals)}, started_at, "ok", summary)
+    finally:
+        conn.close()
+    diagnostics.done(summary)
+
+
 @data_app.command("fetch")
 def data_fetch() -> None:
-    """Enumerate the archive and download missing files. (piece 2 and 3)"""
-    _not_yet(2)
+    """Download the files `data list` found and are still missing. (piece 3)"""
+    _not_yet(3)
 
 
 @data_app.command("verify")

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>data.binance.vision</Name>
+  <Prefix>data/spot/monthly/klines/LUNAUSDT/1d/</Prefix>
+  <Marker></Marker>
+  <MaxKeys>1000</MaxKeys>
+  <Delimiter>/</Delimiter>
+  <IsTruncated>false</IsTruncated>
+  <Contents>
+    <Key>data/spot/monthly/klines/LUNAUSDT/1d/LUNAUSDT-1d-2020-08.zip</Key>
+    <LastModified>2021-11-04T04:11:46.000Z</LastModified>
+    <ETag>"8d1c0e8f3b7a2c5d4e6f7a8b9c0d1e2f"</ETag>
+    <Size>1234</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+  <Contents>
+    <Key>data/spot/monthly/klines/LUNAUSDT/1d/LUNAUSDT-1d-2020-08.zip.CHECKSUM</Key>
+    <LastModified>2021-11-04T04:11:46.000Z</LastModified>
+    <ETag>"0a1b2c3d4e5f60718293a4b5c6d7e8f9"</ETag>
+    <Size>98</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+  <Contents>
+    <Key>data/spot/monthly/klines/LUNAUSDT/1d/LUNAUSDT-1d-2022-05.zip</Key>
+    <LastModified>2022-06-01T02:01:10.000Z</LastModified>
+    <ETag>"ffeeddccbbaa99887766554433221100"</ETag>
+    <Size>2048</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+  <Contents>
+    <Key>data/spot/monthly/klines/LUNAUSDT/1d/LUNAUSDT-1d-2022-05.zip.CHECKSUM</Key>
+    <LastModified>2022-06-01T02:01:10.000Z</LastModified>
+    <ETag>"00112233445566778899aabbccddeeff"</ETag>
+    <Size>98</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+</ListBucketResult>

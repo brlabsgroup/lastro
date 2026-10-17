@@ -120,4 +120,4 @@ def test_unimplemented_commands_say_so():
     result = CliRunner().invoke(app, ["data", "fetch"])
     assert result.exit_code == 2
     assert "not implemented yet" in result.output
-    assert "piece 2" in result.output
+    assert "piece 3" in result.output
