@@ -43,7 +43,7 @@ def test_database_check_before_and_after_init(data_dir: Path):
     conn.close()
     after = diagnostics.check_database()
     assert after.ok
-    assert "schema version 1" in after.detail
+    assert "schema version 3" in after.detail
 
 
 def test_dependencies_check_passes_in_dev_env():
@@ -104,9 +104,9 @@ def test_cli_doctor_offline_fails_before_init_and_passes_after(data_dir: Path):
     assert "4 checks passed, 0 failed" in result.output
 
 
-def test_fail_prints_three_parts_and_exits():
-    result = CliRunner().invoke(app, ["data", "freeze"])
-    assert result.exit_code == 2
-    assert "FAILED  this command" in result.output
-    assert "why:" in result.output
-    assert "fix:" in result.output
+def test_fail_prints_three_parts_and_exits(data_dir: Path):
+    result = CliRunner().invoke(app, ["data", "status"])  # no database yet
+    assert result.exit_code == 1
+    assert "FAILED  opening the database" in result.output
+    assert "why: no database at" in result.output
+    assert "fix: run `lastro db init`" in result.output

@@ -138,6 +138,28 @@ def test_last_candle_is_the_last_day_with_volume(conn):
     assert rows["BTCBUSD"] == "2023-12-10T00:00:00+00:00"  # zero volume from the 11th on
 
 
+def test_convert_counts_boundary_duplicates(conn):
+    """A month whose zip repeats the previous month's last candle: one row dropped, counted, reported."""
+    url = conn.execute("SELECT url FROM archive_files WHERE symbol = 'BTCUSDT' AND month = '2024-12'").fetchone()["url"]
+    path = fetch.local_path(url)
+    with zipfile.ZipFile(path) as zf:
+        text = zf.read(zf.namelist()[0]).decode()
+    lines = text.strip().splitlines()
+    lines.insert(1, candle_line(ts(2024, 11, 30), "ms", 130.0))  # November 30 again, inside the December file
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("BTCUSDT-1d-2024-12.csv", "\n".join(lines) + "\n")
+    path.write_bytes(buf.getvalue())
+
+    result = parquet.convert_verified(conn, symbols=["BTCUSDT"])
+    assert result.failed == []
+    assert result.duplicates == 1
+    assert result.rows == 30 + 31 + 31  # written rows, the duplicate excluded
+    cli = CliRunner().invoke(app, ["data", "convert", "-s", "BTCUSDT"])
+    assert cli.exit_code == 0, cli.output
+    assert "ok      3 files, 92 rows into 2 partitions, 1 boundary duplicates dropped" in cli.output
+
+
 def test_convert_is_idempotent(conn):
     first = parquet.convert_verified(conn)
     second = parquet.convert_verified(conn)

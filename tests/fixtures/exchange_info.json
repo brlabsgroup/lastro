@@ -1,0 +1,53 @@
+{
+  "timezone": "UTC",
+  "serverTime": 1760700000000,
+  "rateLimits": [],
+  "exchangeFilters": [],
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "status": "TRADING",
+      "baseAsset": "BTC",
+      "quoteAsset": "USDT",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {"filterType": "PRICE_FILTER", "minPrice": "0.01000000", "maxPrice": "1000000.00000000", "tickSize": "0.01000000"},
+        {"filterType": "LOT_SIZE", "minQty": "0.00001000", "maxQty": "9000.00000000", "stepSize": "0.00001000"},
+        {"filterType": "NOTIONAL", "minNotional": "5.00000000", "applyMinToMarket": true, "maxNotional": "9000000.00000000"}
+      ],
+      "permissionSets": [["SPOT", "MARGIN"]]
+    },
+    {
+      "symbol": "LUNAUSDT",
+      "status": "BREAK",
+      "baseAsset": "LUNA",
+      "quoteAsset": "USDT",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {"filterType": "PRICE_FILTER", "minPrice": "0.00010000", "maxPrice": "1000.00000000", "tickSize": "0.00010000"},
+        {"filterType": "LOT_SIZE", "minQty": "0.01000000", "maxQty": "900000.00000000", "stepSize": "0.01000000"},
+        {"filterType": "NOTIONAL", "minNotional": "5.00000000"}
+      ]
+    },
+    {
+      "symbol": "OLDUSDT",
+      "status": "TRADING",
+      "baseAsset": "OLD",
+      "quoteAsset": "USDT",
+      "isSpotTradingAllowed": true,
+      "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.00100000"},
+        {"filterType": "LOT_SIZE", "minQty": "1.00000000", "stepSize": "1.00000000"},
+        {"filterType": "MIN_NOTIONAL", "minNotional": "10.00000000"}
+      ]
+    },
+    {
+      "symbol": "ETHBTC",
+      "status": "TRADING",
+      "baseAsset": "ETH",
+      "quoteAsset": "BTC",
+      "isSpotTradingAllowed": true,
+      "filters": []
+    }
+  ]
+}

@@ -80,6 +80,12 @@ def applied_versions(conn: sqlite3.Connection) -> list[int]:
     return [row["version"] for row in rows]
 
 
+def pending_versions(conn: sqlite3.Connection) -> list[str]:
+    """Names of the shipped migrations this database has not applied yet."""
+    done = set(applied_versions(conn))
+    return [name for version, name, _ in _migration_files() if version not in done]
+
+
 def _statements(sql: str) -> list[str]:
     """Split a migration file into individual statements.
 

@@ -199,3 +199,30 @@ def test_cli_data_list_reports_partial_failure(conn, monkeypatch):
     assert "FAIL  BTCUSDT" in result.output
     assert "fix: run `lastro data list` again" in result.output
     assert conn.execute("SELECT outcome FROM runs").fetchone()["outcome"] == "partial"
+
+
+def test_split_symbol_knows_the_quote_assets():
+    assert archive.split_symbol("BTCUSDT") == ("BTC", "USDT")
+    assert archive.split_symbol("BTCBUSD") == ("BTC", "BUSD")
+    assert archive.split_symbol("USDTBRL") == ("USDT", "BRL")
+    assert archive.split_symbol("BTCFDUSD") == ("BTC", "FDUSD")
+    assert archive.split_symbol("ETHBTC") == ("ETH", "BTC")
+    assert archive.split_symbol("WEIRDXYZ") == ("WEIRDXYZ", None)
+
+
+def test_upsert_symbol_derives_base_and_quote_but_defers_to_exchange_info(conn):
+    archive._upsert_symbol(conn, "USDTBRL", ["2020-11", "2026-09"])
+    archive._upsert_symbol(conn, "FOOUSDT", ["2024-01"])
+    rows = {r["symbol"]: r for r in conn.execute("SELECT * FROM symbols").fetchall()}
+    assert (rows["USDTBRL"]["base_asset"], rows["USDTBRL"]["quote_asset"]) == ("USDT", "BRL")
+    assert (rows["FOOUSDT"]["base_asset"], rows["FOOUSDT"]["quote_asset"]) == ("FOO", "USDT")
+    # exchangeInfo knows better (a token whose ticker differs from its pair name); a later listing must not undo it.
+    with store.transaction(conn):
+        conn.execute("UPDATE symbols SET base_asset = 'FOOX' WHERE symbol = 'FOOUSDT'")
+        conn.execute(
+            "INSERT INTO exchange_symbols (captured_on, symbol, status, base_asset, quote_asset, spot_allowed, captured_at) "
+            "VALUES ('2026-10-17', 'FOOUSDT', 'TRADING', 'FOOX', 'USDT', 1, 't')"
+        )
+    archive._upsert_symbol(conn, "FOOUSDT", ["2024-02"])
+    row = conn.execute("SELECT base_asset, first_month, last_month FROM symbols WHERE symbol = 'FOOUSDT'").fetchone()
+    assert (row["base_asset"], row["first_month"], row["last_month"]) == ("FOOX", "2024-01", "2024-02")

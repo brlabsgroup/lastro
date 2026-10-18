@@ -1,10 +1,14 @@
 """Paths and runtime configuration.
 
-The only configurable thing in Phase 1 is where the data lives. The default is
-``data/`` at the repository root. Set the ``LASTRO_DATA_DIR`` environment
-variable to point elsewhere (an external disk, a VPS volume). Changing it is
-supported in the sense that the code honours it, and unsupported in every other
-sense: whoever moves the data is responsible for it.
+Two things are configurable in Phase 1, both through environment variables:
+
+- ``LASTRO_DATA_DIR``: where the data lives. The default is ``data/`` at the
+  repository root. Changing it is supported in the sense that the code honours
+  it, and unsupported in every other sense: whoever moves the data is
+  responsible for it.
+- ``LASTRO_BINANCE_API``: base URL for Binance's public market-data REST API
+  (exchange metadata, order book depth). The default is the market-data-only
+  host, which needs no key and is not geo-restricted the way the main API is.
 """
 
 from __future__ import annotations
@@ -13,9 +17,16 @@ import os
 from pathlib import Path
 
 ENV_DATA_DIR = "LASTRO_DATA_DIR"
+ENV_BINANCE_API = "LASTRO_BINANCE_API"
+DEFAULT_BINANCE_API = "https://data-api.binance.vision"
 
 # Repository root: the directory that holds pyproject.toml, two levels above this file.
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def binance_api() -> str:
+    """Base URL of the public market-data API, honouring LASTRO_BINANCE_API when set."""
+    return os.environ.get(ENV_BINANCE_API, DEFAULT_BINANCE_API).rstrip("/")
 
 
 def data_dir() -> Path:

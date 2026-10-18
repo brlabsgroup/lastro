@@ -16,6 +16,8 @@ EXPECTED_TABLES = {
     "dataset_manifest",
     "runs",
     "schema_version",
+    "exchange_symbols",
+    "fx_rates",
 }
 
 
@@ -28,9 +30,9 @@ def data_dir(monkeypatch, tmp_path: Path) -> Path:
 def test_init_creates_all_tables(data_dir: Path):
     conn, applied = store.init()
     try:
-        assert applied == ["001_initial.sql"]
+        assert applied == ["001_initial.sql", "002_exchange_fx.sql", "003_universe_jurisdiction.sql"]
         assert set(store.user_tables(conn)) == EXPECTED_TABLES
-        assert store.applied_versions(conn) == [1]
+        assert store.applied_versions(conn) == [1, 2, 3]
         assert all(count == 0 for name, count in store.table_counts(conn).items() if name != "schema_version")
     finally:
         conn.close()
@@ -41,9 +43,9 @@ def test_init_twice_applies_nothing_new(data_dir: Path):
     conn.close()
     conn, second = store.init()
     try:
-        assert first == ["001_initial.sql"]
+        assert first == ["001_initial.sql", "002_exchange_fx.sql", "003_universe_jurisdiction.sql"]
         assert second == []
-        assert store.applied_versions(conn) == [1]
+        assert store.applied_versions(conn) == [1, 2, 3]
         assert set(store.user_tables(conn)) == EXPECTED_TABLES
     finally:
         conn.close()
@@ -88,7 +90,7 @@ def test_cli_init_and_status(data_dir: Path):
     runner = CliRunner()
     result = runner.invoke(app, ["db", "init"])
     assert result.exit_code == 0, result.output
-    assert "ok      database initialized, applied 001_initial.sql" in result.output
+    assert "ok      database initialized, applied 001_initial.sql, 002_exchange_fx.sql, 003_universe_jurisdiction.sql" in result.output
 
     result = runner.invoke(app, ["db", "init"])
     assert result.exit_code == 0, result.output
@@ -96,10 +98,10 @@ def test_cli_init_and_status(data_dir: Path):
 
     result = runner.invoke(app, ["db", "status"])
     assert result.exit_code == 0, result.output
-    assert "schema version: 1" in result.output
+    assert "schema version: 3" in result.output
     for name in EXPECTED_TABLES:
         assert name in result.output
-    assert "ok      8 tables, schema version 1" in result.output
+    assert "ok      10 tables, schema version 3" in result.output
 
 
 def test_cli_status_without_db_fails_cleanly(data_dir: Path):
@@ -114,10 +116,3 @@ def test_cli_version():
     result = CliRunner().invoke(app, ["--version"])
     assert result.exit_code == 0
     assert result.output.startswith("lastro ")
-
-
-def test_unimplemented_commands_say_so():
-    result = CliRunner().invoke(app, ["data", "freeze"])
-    assert result.exit_code == 2
-    assert "not implemented yet" in result.output
-    assert "piece 8" in result.output
